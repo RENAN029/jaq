@@ -28,4 +28,3 @@ sudo pacman -Scc --noconfirm
 echo "sudo pacman -S nix yay ananicy-cpp clamav irqbalance cups pnpm mise mangohud distrobox docker gamescope tailscale"     
 cd ..
 rm -rf jq
- 
