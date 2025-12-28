@@ -1,6 +1,6 @@
-git clone https://github.com/RENAN029/MISE.git
+git clone https://github.com/RENAN029/jq.git
 
-cd iwd
+cd jq
 
 chmod +x b.sh
 
