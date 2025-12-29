@@ -25,6 +25,6 @@ echo -e "\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist" | sudo tee
 
 sudo pacman -Syu --noconfirm 
 sudo pacman -Scc --noconfirm
-echo "sudo pacman -S nix yay ananicy-cpp clamav irqbalance cups pnpm mise mangohud distrobox docker gamescope tailscale"     
+echo "sudo pacman -S iwd yay ananicy-cpp clamav irqbalance cups pnpm mise mangohud distrobox docker gamescope tailscale"     
 cd ..
 rm -rf jq
