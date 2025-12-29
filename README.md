@@ -6,9 +6,9 @@ chmod +x b.sh
 
 ./b.sh
 
-sudo pacman -Scc
+sudo pacman -Scc 
 
-sudo pacman -S 
+sudo pacman -S python-pip rustup
 
 sudo pacman -Syu $(pacman -Qnq) 
 
