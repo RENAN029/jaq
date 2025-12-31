@@ -6,7 +6,7 @@ chmod +x b.sh
 
 ./b.sh
 
-sudo pacman -Scc smartmontools iwd
+sudo pacman -Scc gemini-cli iwd
 
 sudo pacman -S github-cli httpie
 
