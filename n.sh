@@ -246,8 +246,8 @@ uninstall_lucidglyph() {
     
     rm -rf "$HOME/.local/share/lucidglyph" "$HOME/.local/share/freetype-envision" 2>/dev/null
     
-    find /etc/fonts/conf.d -name "*lucidglyph*" -o -name "*freetype-envision*" 2>/dev/null | xargs rm -f
-    find "$HOME/.config/fontconfig/conf.d" -name "*lucidglyph*" -o -name "*freetype-envision*" 2>/dev/null | xargs rm -f
+    find /etc/fonts/conf.d -name "*lucidglyph*" -o -name "*freetype-envision*" 2>/dev/null | xargs rm -f 2>/dev/null
+    find "$HOME/.config/fontconfig/conf.d" -name "*lucidglyph*" -o -name "*freetype-envision*" 2>/dev/null | xargs rm -f 2>/dev/null
     
     sed -i '/LUCIDGLYPH\|FREETYPE_ENVISION/d' /etc/environment 2>/dev/null
     sed -i '/LUCIDGLYPH\|FREETYPE_ENVISION/d' "$HOME/.profile" 2>/dev/null
@@ -322,6 +322,7 @@ lucidglyph() {
     fi
     
     read -p "Pressione Enter para continuar..."
+    return 0
 }
 
 apparmor() {
@@ -342,7 +343,9 @@ apparmor() {
                 if [ "$resposta" = "s" ]; then
                     if [ -f "/etc/default/grub.d/99-apparmor.cfg" ]; then
                         rm -f /etc/default/grub.d/99-apparmor.cfg
-                        grub-mkconfig -o /boot/grub/grub.cfg
+                        if [ -f /boot/grub/grub.cfg ]; then
+                            grub-mkconfig -o /boot/grub/grub.cfg
+                        fi
                     fi
                     
                     if [ -d "/etc/kernel/cmdline.d" ]; then
@@ -380,12 +383,14 @@ apparmor() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando AppArmor..."
             
-            pacman -S --noconfirm apparmor
+            pacman -S --noconfirm apparmor --needed
             
             if pacman -Qi grub &>/dev/null; then
                 mkdir -p /etc/default/grub.d
                 echo 'GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT} apparmor=1 security=apparmor"' | tee /etc/default/grub.d/99-apparmor.cfg
-                grub-mkconfig -o /boot/grub/grub.cfg
+                if [ -f /boot/grub/grub.cfg ]; then
+                    grub-mkconfig -o /boot/grub/grub.cfg
+                fi
             else
                 mkdir -p /etc/kernel/cmdline.d 2>/dev/null || true
                 echo "apparmor=1 security=apparmor" | tee /etc/kernel/cmdline.d/99-apparmor.conf 2>/dev/null
@@ -454,7 +459,7 @@ ufw_firewall() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando UFW..."
             
-            pacman -S --noconfirm ufw gufw
+            pacman -S --noconfirm ufw gufw --needed
             
             ufw default deny incoming
             ufw default allow outgoing
@@ -529,7 +534,7 @@ earlyoom() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando EarlyOOM..."
             
-            pacman -S --noconfirm earlyoom
+            pacman -S --noconfirm earlyoom --needed
             systemctl enable earlyoom
             systemctl start earlyoom
             
@@ -593,7 +598,7 @@ dnsmasq() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando DNSMasq..."
             
-            pacman -S --noconfirm dnsmasq
+            pacman -S --noconfirm dnsmasq --needed
             
             cat > /etc/dnsmasq.conf << 'EOF'
 port=53
@@ -610,7 +615,7 @@ EOF
             systemctl start dnsmasq
             
             echo "1" > "$S_DNSMASQ"
-            echo "DNSMasq instalado e configurado com sucesso! Reinicie para aplicar."
+            echo "DNSMasq instalado e configurado com sucesso!"
         fi
     fi
     
@@ -636,16 +641,22 @@ nix_packages() {
                 if [ "$resposta" = "s" ]; then
                     echo "Desinstalando Nix..."
                     
-                    if pacman -Qi nix 2>/dev/null | grep -q "Name"; then
-                        pacman -Rns --noconfirm nix 2>/dev/null
-                    fi
+                    echo "Removendo pacote nix via pacman..."
+                    pacman -Rns --noconfirm nix 2>/dev/null && echo "Pacote nix removido" || echo "Pacote nix não encontrado ou já removido"
                     
+                    echo "Removendo variáveis de ambiente..."
                     sed -i '/export PATH="\$HOME\/.nix-profile\/bin:\$PATH"/d' ~/.bashrc 2>/dev/null
                     sed -i '/export XDG_DATA_DIRS="\$HOME\/.nix-profile\/share:\$XDG_DATA_DIRS"/d' ~/.profile 2>/dev/null
                     sed -i '/export XDG_DATA_DIRS="\$HOME\/.nix-profile\/share:\$XDG_DATA_DIRS"/d' ~/.bash_profile 2>/dev/null
                     sed -i '/source \${\?HOME\}\?\/.nix-profile\/etc\/profile.d\/nix.sh/d' ~/.bashrc 2>/dev/null
                     
-                    rm -rf ~/.nix-profile ~/.nix-defexpr ~/.nix-channels ~/.config/nix /nix 2>/dev/null
+                    echo "Removendo diretórios do Nix..."
+                    rm -rf ~/.nix-profile ~/.nix-defexpr ~/.nix-channels ~/.config/nix 2>/dev/null
+                    
+                    # Remover /nix apenas se for um diretório de montagem ou link
+                    if [ -d /nix ] && ! mountpoint -q /nix; then
+                        rm -rf /nix 2>/dev/null || echo "Não foi possível remover /nix (pode ser necessário remover manualmente)"
+                    fi
                     
                     rm -f "$S_NIX"
                     echo "Nix removido. Reinicie o shell para aplicar."
@@ -691,18 +702,24 @@ nix_packages() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando Nix Packages..."
             
-            pacman -S --noconfirm nix
+            pacman -S --noconfirm nix --needed
             
             if [ -f ~/.bashrc ]; then
-                echo 'export PATH="$HOME/.nix-profile/bin:$PATH"' >> ~/.bashrc
+                if ! grep -q 'export PATH="$HOME/.nix-profile/bin:$PATH"' ~/.bashrc; then
+                    echo 'export PATH="$HOME/.nix-profile/bin:$PATH"' >> ~/.bashrc
+                fi
             fi
             
             if [ -f ~/.profile ]; then
-                echo 'export XDG_DATA_DIRS="$HOME/.nix-profile/share:$XDG_DATA_DIRS"' >> ~/.profile
+                if ! grep -q 'export XDG_DATA_DIRS="$HOME/.nix-profile/share:$XDG_DATA_DIRS"' ~/.profile; then
+                    echo 'export XDG_DATA_DIRS="$HOME/.nix-profile/share:$XDG_DATA_DIRS"' >> ~/.profile
+                fi
             fi
             
             if [ -f ~/.bash_profile ]; then
-                echo 'export XDG_DATA_DIRS="$HOME/.nix-profile/share:$XDG_DATA_DIRS"' >> ~/.bash_profile
+                if ! grep -q 'export XDG_DATA_DIRS="$HOME/.nix-profile/share:$XDG_DATA_DIRS"' ~/.bash_profile; then
+                    echo 'export XDG_DATA_DIRS="$HOME/.nix-profile/share:$XDG_DATA_DIRS"' >> ~/.bash_profile
+                fi
             fi
             
             echo "1" > "$S_NIX"
@@ -775,11 +792,15 @@ chaotic_aur() {
             pacman -U --noconfirm "https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst"
             
             sed -i 's/^#Color/Color/' /etc/pacman.conf
-            sed -i '/Color/a ILoveCandy' /etc/pacman.conf
+            if ! grep -q 'ILoveCandy' /etc/pacman.conf; then
+                sed -i '/Color/a ILoveCandy' /etc/pacman.conf
+            fi
             sed -i '/^ParallelDownloads/d' /etc/pacman.conf
             sed -i '/ILoveCandy/a ParallelDownloads = 15' /etc/pacman.conf
             
-            echo -e "\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist" | tee -a /etc/pacman.conf
+            if ! grep -q "\[chaotic-aur\]" /etc/pacman.conf; then
+                echo -e "\n[chaotic-aur]\nInclude = /etc/pacman.d/chaotic-mirrorlist" | tee -a /etc/pacman.conf
+            fi
             
             pacman -Syu --noconfirm
             
@@ -812,7 +833,7 @@ docker_install() {
                     systemctl disable docker --now 2>/dev/null
                     systemctl disable docker.socket --now 2>/dev/null
                     
-                    pacman -Rns --noconfirm docker docker-compose docker-buildx docker-rootless-extras
+                    pacman -Rns --noconfirm docker docker-compose docker-buildx
                     
                     if getent group docker >/dev/null; then
                         gpasswd -d $USER docker 2>/dev/null || true
@@ -865,10 +886,19 @@ docker_install() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando Docker..."
             
-            pacman -Syu --noconfirm
+            # Primeiro, instalar apenas os pacotes essenciais
+            pacman -S --noconfirm docker docker-compose docker-buildx --needed
             
-            pacman -S --noconfirm docker docker-compose docker-buildx docker-rootless-extras
+            # docker-rootless-extras pode não estar disponível em todos os repositórios
+            if pacman -Si docker-rootless-extras &>/dev/null; then
+                pacman -S --noconfirm docker-rootless-extras --needed
+            else
+                echo "docker-rootless-extras não está disponível no repositório, pulando..."
+            fi
             
+            if ! getent group docker >/dev/null; then
+                groupadd docker 2>/dev/null || true
+            fi
             usermod -aG docker $USER
             
             systemctl enable docker
@@ -878,8 +908,14 @@ docker_install() {
             
             sleep 2
             
+            if systemctl is-active docker &>/dev/null; then
+                echo "Docker instalado e serviço iniciado com sucesso!"
+            else
+                echo "Docker instalado, mas o serviço falhou ao iniciar."
+                echo "Verifique com: systemctl status docker"
+            fi
+            
             echo "1" > "$S_DOCKER"
-            echo "Docker instalado com sucesso! Reinicie para que o usuário seja adicionado ao grupo docker."
             echo ""
             echo "Pode instalar o Portainer CE para gerenciar o Docker após reiniciar."
         fi
@@ -966,7 +1002,7 @@ tailscale_install() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando Tailscale..."
             
-            pacman -S --noconfirm tailscale
+            pacman -S --noconfirm tailscale --needed
             
             systemctl enable tailscaled
             systemctl start tailscaled
@@ -1061,7 +1097,7 @@ fisher_install() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando Fish Shell e Fisher..."
             
-            pacman -S --noconfirm fish fisher
+            pacman -S --noconfirm fish fisher --needed
             
             echo "Configurando Fish como shell padrão..."
             chsh -s "$(which fish)" $USER
@@ -1096,21 +1132,35 @@ starship_install() {
                 if [ "$resposta" = "s" ]; then
                     echo "Desinstalando Starship..."
                     
+                    # Primeiro, verificar se está instalado via pacman
                     if pacman -Qi starship 2>/dev/null | grep -q "Name"; then
-                        pacman -Rns --noconfirm starship 2>/dev/null
+                        echo "Removendo pacote starship via pacman..."
+                        pacman -Rns --noconfirm starship 2>/dev/null && echo "Starship removido via pacman"
                     fi
                     
-                    rm -f /usr/local/bin/starship 2>/dev/null
-                    rm -f /usr/bin/starship 2>/dev/null
+                    # Remover se foi instalado via script
+                    if [ -f /usr/local/bin/starship ]; then
+                        rm -f /usr/local/bin/starship 2>/dev/null && echo "Removido /usr/local/bin/starship"
+                    fi
                     
-                    sed -i '/eval "\$(starship init bash)"/d' ~/.bashrc 2>/dev/null
-                    sed -i '/eval "\$(starship init zsh)"/d' ~/.zshrc 2>/dev/null
+                    if [ -f /usr/bin/starship ]; then
+                        rm -f /usr/bin/starship 2>/dev/null && echo "Removido /usr/bin/starship"
+                    fi
+                    
+                    # Remover configurações dos shells
+                    if [ -f ~/.bashrc ]; then
+                        sed -i '/eval "\$(starship init bash)"/d' ~/.bashrc 2>/dev/null && echo "Removido do .bashrc"
+                    fi
+                    
+                    if [ -f ~/.zshrc ]; then
+                        sed -i '/eval "\$(starship init zsh)"/d' ~/.zshrc 2>/dev/null && echo "Removido do .zshrc"
+                    fi
                     
                     if [ -f ~/.config/fish/config.fish ]; then
-                        sed -i '/starship init fish | source/d' ~/.config/fish/config.fish 2>/dev/null
+                        sed -i '/starship init fish | source/d' ~/.config/fish/config.fish 2>/dev/null && echo "Removido do config.fish"
                     fi
                     
-                    rm -f "$S_STARSHIP"
+                    rm -f "$S_STARSHIP" 2>/dev/null && echo "Arquivo de estado removido"
                     echo "Starship removido. Reinicie os terminais para aplicar."
                 fi
                 ;;
@@ -1125,13 +1175,13 @@ starship_install() {
                         echo ""
                         echo "Configurações ativas:"
                         
-                        if grep -q 'eval "\$(starship init bash)"' ~/.bashrc 2>/dev/null; then
+                        if [ -f ~/.bashrc ] && grep -q 'eval "\$(starship init bash)"' ~/.bashrc 2>/dev/null; then
                             echo "- Bash: CONFIGURADO"
                         else
                             echo "- Bash: NÃO CONFIGURADO"
                         fi
                         
-                        if grep -q 'eval "\$(starship init zsh)"' ~/.zshrc 2>/dev/null; then
+                        if [ -f ~/.zshrc ] && grep -q 'eval "\$(starship init zsh)"' ~/.zshrc 2>/dev/null; then
                             echo "- Zsh: CONFIGURADO"
                         else
                             echo "- Zsh: NÃO CONFIGURADO"
@@ -1197,7 +1247,7 @@ starship_install() {
             
             if pacman -Si starship 2>/dev/null | grep -q "Name"; then
                 echo "Instalando via pacman..."
-                pacman -S --noconfirm starship
+                pacman -S --noconfirm starship --needed
             else
                 echo "Instalando via script oficial..."
                 curl -fsSL https://starship.rs/install.sh | sh -s -- -f -y
@@ -1457,7 +1507,7 @@ flathub_install() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando Flatpak e configurando Flathub..."
             
-            pacman -S --noconfirm flatpak
+            pacman -S --noconfirm flatpak --needed
             
             flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
             
@@ -1542,11 +1592,11 @@ yay_install() {
             
             if grep -q "\[chaotic-aur\]" /etc/pacman.conf; then
                 echo "Usando Chaotic AUR para instalar yay..."
-                pacman -S --noconfirm yay
+                pacman -S --noconfirm yay --needed
             else
                 echo "Chaotic AUR não encontrado. Instalando via método tradicional..."
                 
-                pacman -S --noconfirm base-devel git
+                pacman -S --noconfirm base-devel git --needed
                 
                 if [ -d /tmp/yay ]; then
                     rm -rf /tmp/yay
@@ -1581,6 +1631,32 @@ lazyman_install() {
     
     if [ -f "$S_LAZYMAN" ]; then
         echo "Status: INSTALADO"
+        echo "Qual configuração está instalada?"
+        
+        lazyman_installed=""
+        lazyvim_installed=""
+        
+        if [ -d "$HOME/.config/nvim-Lazyman" ]; then
+            lazyman_installed="✓ Lazyman"
+        fi
+        
+        if [ -d "$HOME/.config/nvim" ] && [ -f "$HOME/.config/nvim/init.lua" ]; then
+            lazyvim_installed="✓ LazyVim"
+        fi
+        
+        if [ -n "$lazyman_installed" ] && [ -n "$lazyvim_installed" ]; then
+            echo "Ambos estão instalados:"
+            echo "  - $lazyman_installed"
+            echo "  - $lazyvim_installed"
+        elif [ -n "$lazyman_installed" ]; then
+            echo "$lazyman_installed"
+        elif [ -n "$lazyvim_installed" ]; then
+            echo "$lazyvim_installed"
+        else
+            echo "Nenhum detectado (apenas estado registrado)"
+        fi
+        
+        echo ""
         echo "1) Desinstalar"
         echo "2) Ver status"
         echo "3) Instalar LazyVim direto"
@@ -1590,26 +1666,53 @@ lazyman_install() {
         
         case $opt in
             1)
-                read -p "Deseja remover? (1=Lazyman, 2=LazyVim): " remover_opcao
+                echo "O que deseja desinstalar?"
+                echo "1) Apenas Lazyman"
+                echo "2) Apenas LazyVim"
+                echo "3) Ambos (mas mantém Neovim)"
+                echo "4) Cancelar"
+                read -p "> " remover_opcao
                 echo
-                if [ "$remover_opcao" = "1" ]; then
-                    if [ -d "$HOME/.config/nvim-Lazyman" ]; then
-                        rm -rf "$HOME/.config/nvim-Lazyman"
-                        echo "Lazyman removido."
-                    fi
-                elif [ "$remover_opcao" = "2" ]; then
-                    if [ -d "$HOME/.config/nvim" ]; then
-                        rm -rf "$HOME/.config/nvim"
-                        echo "LazyVim removido."
-                    fi
-                fi
+                
+                case $remover_opcao in
+                    1)
+                        if [ -d "$HOME/.config/nvim-Lazyman" ]; then
+                            rm -rf "$HOME/.config/nvim-Lazyman"
+                            echo "Lazyman removido."
+                        else
+                            echo "Lazyman não está instalado."
+                        fi
+                        ;;
+                    2)
+                        if [ -d "$HOME/.config/nvim" ]; then
+                            rm -rf "$HOME/.config/nvim"
+                            echo "LazyVim removido."
+                        else
+                            echo "LazyVim não está instalado."
+                        fi
+                        ;;
+                    3)
+                        if [ -d "$HOME/.config/nvim-Lazyman" ]; then
+                            rm -rf "$HOME/.config/nvim-Lazyman"
+                            echo "Lazyman removido."
+                        fi
+                        if [ -d "$HOME/.config/nvim" ]; then
+                            rm -rf "$HOME/.config/nvim"
+                            echo "LazyVim removido."
+                        fi
+                        
+                        if [ ! -d "$HOME/.config/nvim-Lazyman" ] && [ ! -d "$HOME/.config/nvim" ]; then
+                            echo "Mantendo Neovim instalado."
+                        fi
+                        ;;
+                    4)
+                        return
+                        ;;
+                esac
                 
                 if [ ! -d "$HOME/.config/nvim-Lazyman" ] && [ ! -d "$HOME/.config/nvim" ]; then
-                    pacman -Rns --noconfirm neovim 2>/dev/null || true
                     rm -f "$S_LAZYMAN"
-                    echo "Neovim removido."
-                else
-                    echo "Mantendo Neovim (outras configurações ainda existem)."
+                    echo "Estado removido do script."
                 fi
                 ;;
             2)
@@ -1618,10 +1721,17 @@ lazyman_install() {
                     
                     if [ -d "$HOME/.config/nvim-Lazyman" ]; then
                         echo "Lazyman: INSTALADO em ~/.config/nvim-Lazyman"
+                        if [ -f "$HOME/.config/nvim-Lazyman/lazyman.sh" ]; then
+                            echo "Executável disponível: ~/.config/nvim-Lazyman/lazyman.sh"
+                        fi
+                    else
+                        echo "Lazyman: NÃO INSTALADO"
                     fi
                     
-                    if [ -d "$HOME/.config/nvim" ]; then
+                    if [ -d "$HOME/.config/nvim" ] && [ -f "$HOME/.config/nvim/init.lua" ]; then
                         echo "LazyVim: INSTALADO em ~/.config/nvim"
+                    else
+                        echo "LazyVim: NÃO INSTALADO"
                     fi
                     
                     if command -v nvim &>/dev/null; then
@@ -1638,10 +1748,11 @@ lazyman_install() {
                 if [ "$resposta" = "s" ]; then
                     echo "Instalando LazyVim direto..."
                     
-                    pacman -S --noconfirm neovim git
+                    pacman -S --noconfirm neovim git --needed
                     
                     if [ -d "$HOME/.config/nvim" ]; then
-                        rm -rf "$HOME/.config/nvim"
+                        echo "Backup da configuração existente..."
+                        mv "$HOME/.config/nvim" "$HOME/.config/nvim.backup.$(date +%s)"
                     fi
                     
                     git clone https://github.com/LazyVim/starter "$HOME/.config/nvim"
@@ -1665,14 +1776,17 @@ lazyman_install() {
                         rm -rf "$HOME/.config/nvim-Lazyman"
                     fi
                     
-                    pacman -S --noconfirm neovim git
+                    pacman -S --noconfirm neovim git --needed
                     
                     git clone --depth=1 https://github.com/doctorfree/nvim-lazyman "$HOME/.config/nvim-Lazyman"
                     
                     if [ -f "$HOME/.config/nvim-Lazyman/lazyman.sh" ]; then
                         echo "Lazyman reinstalado com sucesso!"
                         echo ""
-                        echo "Execute a instalação do Lazyman para escolher uma configuração de Neovim."
+                        echo "Localização: ~/.config/nvim-Lazyman"
+                        echo "Execute ~/.config/nvim-Lazyman/lazyman.sh para escolher uma configuração de Neovim."
+                        
+                        echo "1" > "$S_LAZYMAN"
                     else
                         echo "Erro: Não foi possível reinstalar o Lazyman."
                     fi
@@ -1699,10 +1813,11 @@ lazyman_install() {
                     if [ -f "$HOME/.config/nvim-Lazyman/lazyman.sh" ]; then
                         echo "Lazyman já está instalado."
                         echo "1" > "$S_LAZYMAN"
+                        read -p "Pressione Enter para continuar..."
                         return
                     fi
                     
-                    pacman -S --noconfirm neovim git
+                    pacman -S --noconfirm neovim git --needed
                     
                     git clone --depth=1 https://github.com/doctorfree/nvim-lazyman "$HOME/.config/nvim-Lazyman"
                     
@@ -1724,7 +1839,7 @@ lazyman_install() {
                 if [ "$resposta" = "s" ]; then
                     echo "Instalando LazyVim diretamente..."
                     
-                    pacman -S --noconfirm neovim git
+                    pacman -S --noconfirm neovim git --needed
                     
                     if [ -d "$HOME/.config/nvim" ]; then
                         read -p "Configuração Neovim existente será substituída. Continuar? (s/n): " -n 1 confirmacao
@@ -1732,7 +1847,8 @@ lazyman_install() {
                         if [ "$confirmacao" != "s" ]; then
                             return
                         fi
-                        rm -rf "$HOME/.config/nvim"
+                        echo "Fazendo backup da configuração existente..."
+                        mv "$HOME/.config/nvim" "$HOME/.config/nvim.backup.$(date +%s)"
                     fi
                     
                     git clone https://github.com/LazyVim/starter "$HOME/.config/nvim"
@@ -1779,7 +1895,9 @@ cpu_ondemand() {
                     
                     if [ -f /etc/default/grub.d/01_intel_pstate_disable ]; then
                         rm -f /etc/default/grub.d/01_intel_pstate_disable
-                        grub-mkconfig -o /boot/grub/grub.cfg
+                        if [ -f /boot/grub/grub.cfg ]; then
+                            grub-mkconfig -o /boot/grub/grub.cfg
+                        fi
                     fi
                     
                     if [ -d /etc/kernel/cmdline.d ]; then
@@ -1846,18 +1964,20 @@ After=multi-user.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c "echo ondemand | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"
+ExecStart=/bin/bash -c "echo ondemand | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null || true"
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
             
-            if ! grep -q "intel_pstate=disable" /proc/cmdline; then
+            if ! grep -q "intel_pstate=disable" /proc/cmdline 2>/dev/null; then
                 if [ -f /boot/grub/grub.cfg ] || [ -f /etc/default/grub ]; then
                     mkdir -p /etc/default/grub.d
                     echo 'GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT intel_pstate=disable"' > /etc/default/grub.d/01_intel_pstate_disable
-                    grub-mkconfig -o /boot/grub/grub.cfg
+                    if [ -f /boot/grub/grub.cfg ]; then
+                        grub-mkconfig -o /boot/grub/grub.cfg
+                    fi
                 fi
             fi
             
@@ -1867,11 +1987,6 @@ EOF
             echo "1" > "$S_ONDEMAND"
             echo "CPU Ondemand Governor instalado com sucesso!"
             echo "Reinicie para que as alterações do kernel sejam aplicadas."
-            read -p "Pressione Enter para continuar..."
-            return
-        else
-            read -p "Pressione Enter para continuar..."
-            return
         fi
     fi
     
@@ -1944,7 +2059,7 @@ ananicy_install() {
             fi
             
             pacman -Syu --noconfirm
-            pacman -S --noconfirm ananicy-cpp cachyos-ananicy-rules-git
+            pacman -S --noconfirm ananicy-cpp cachyos-ananicy-rules-git --needed
             
             systemctl enable ananicy-cpp.service
             systemctl start ananicy-cpp.service
@@ -1975,10 +2090,10 @@ archsb_install() {
         case $opt in
             1)
                 echo "Status do Secure Boot:"
-                sbctl status
+                sbctl status 2>/dev/null || echo "sbctl não está funcionando corretamente"
                 echo ""
                 echo "Arquivos verificados:"
-                sbctl verify
+                sbctl verify 2>/dev/null || echo "Não foi possível verificar arquivos"
                 ;;
             2)
                 read -p "Criar e inscrever novas chaves? (s/n): " -n 1 resposta
@@ -1990,24 +2105,24 @@ archsb_install() {
                     
                     if command -v grub-install &>/dev/null; then
                         echo "Assinando GRUB..."
-                        sudo grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --modules="tpm" --disable-shim-lock
+                        sudo grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --modules="tpm" --disable-shim-lock 2>/dev/null || true
                     fi
                     
                     while IFS= read -r line; do
                         if [[ "$line" =~ ✗ ]]; then
                             file=$(echo "$line" | awk '{print $2}')
                             echo "Assinando: $file"
-                            sudo sbctl sign -s "$file"
+                            sudo sbctl sign -s "$file" 2>/dev/null || true
                         fi
-                    done < <(sudo sbctl verify)
+                    done < <(sudo sbctl verify 2>/dev/null)
                     
                     echo "Todas as chaves foram criadas e arquivos assinados."
-                    sudo sbctl verify
+                    sudo sbctl verify 2>/dev/null || true
                 fi
                 ;;
             3)
                 echo "Verificando arquivos assinados:"
-                sbctl verify
+                sbctl verify 2>/dev/null || echo "Não foi possível verificar arquivos"
                 ;;
             4)
                 read -p "Deseja remover o sbctl? (s/n): " -n 1 resposta
@@ -2034,19 +2149,19 @@ archsb_install() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando sbctl e efibootmgr..."
             
-            pacman -S --noconfirm sbctl efibootmgr
+            pacman -S --noconfirm sbctl efibootmgr --needed
             
             sleep 1
             
             echo "Verificando status do Secure Boot..."
             
-            if sbctl status | grep -i 'secure boot' | grep -qi 'disabled'; then
-                if sbctl status | grep -i 'setup mode' | grep -qi 'enabled'; then
+            if sbctl status 2>/dev/null | grep -i 'secure boot' | grep -qi 'disabled'; then
+                if sbctl status 2>/dev/null | grep -i 'setup mode' | grep -qi 'enabled'; then
                     echo "Secure Boot desativado e Setup Mode ativado - OK"
                     
                     if command -v grub-install &>/dev/null; then
                         echo "Configurando GRUB para Secure Boot..."
-                        sudo grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --modules="tpm" --disable-shim-lock
+                        sudo grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --modules="tpm" --disable-shim-lock 2>/dev/null || true
                     fi
                     
                     echo "Criando chaves Secure Boot..."
@@ -2058,12 +2173,12 @@ archsb_install() {
                         if [[ "$line" =~ ✗ ]]; then
                             file=$(echo "$line" | awk '{print $2}')
                             echo "Assinando: $file"
-                            sudo sbctl sign -s "$file"
+                            sudo sbctl sign -s "$file" 2>/dev/null || true
                         fi
-                    done < <(sudo sbctl verify)
+                    done < <(sudo sbctl verify 2>/dev/null)
                     
                     echo "Verificando assinaturas..."
-                    sudo sbctl verify
+                    sudo sbctl verify 2>/dev/null || true
                     
                     echo "1" > "$S_ARCHSB"
                     echo ""
@@ -2156,25 +2271,25 @@ btrfs_assistant_install() {
                     case $snapper_opt in
                         1)
                             echo "Criando configuração padrão para raiz (/)..."
-                            snapper -c root create-config /
-                            echo "Configuração criada."
+                            snapper -c root create-config / 2>/dev/null || echo "Configuração já existe ou falhou"
+                            echo "Configuração criada ou já existente."
                             ;;
                         2)
                             echo "Configurações do Snapper:"
-                            snapper list-configs
+                            snapper list-configs 2>/dev/null || echo "Não foi possível listar configurações"
                             ;;
                         3)
                             read -p "Descrição do snapshot: " description
                             if [ -n "$description" ]; then
-                                snapper -c root create --description "$description"
-                                echo "Snapshot criado."
+                                snapper -c root create --description "$description" 2>/dev/null || echo "Falha ao criar snapshot"
+                                echo "Snapshot criado ou falhou."
                             else
                                 echo "Descrição não fornecida."
                             fi
                             ;;
                         4)
                             echo "Snapshots existentes:"
-                            snapper -c root list
+                            snapper -c root list 2>/dev/null || echo "Não foi possível listar snapshots"
                             ;;
                     esac
                 else
@@ -2195,11 +2310,10 @@ btrfs_assistant_install() {
         if [ "$resposta" = "s" ]; then
             echo "Instalando Btrfs Assistant e Snapper..."
             
-            pacman -S --noconfirm btrfs-assistant snapper
+            pacman -S --noconfirm btrfs-assistant snapper --needed
             
             if ! snapper list-configs 2>/dev/null | grep -q "root"; then
-                snapper -c root create-config /
-                echo "Configuração padrão do Snapper criada para /"
+                snapper -c root create-config / 2>/dev/null && echo "Configuração padrão do Snapper criada para /" || echo "Configuração já existe ou falhou"
             fi
             
             echo "1" > "$S_BTRFS"
@@ -2243,7 +2357,7 @@ cachyconfs_install() {
                 
                 echo ""
                 echo "Otimizações do kernel (se aplicável):"
-                cat /proc/cmdline | grep -o "mitigations=[^ ]*" 2>/dev/null || echo "Nenhuma configuração de mitigação encontrada"
+                cat /proc/cmdline 2>/dev/null | grep -o "mitigations=[^ ]*" 2>/dev/null || echo "Nenhuma configuração de mitigação encontrada"
                 ;;
             2)
                 read -p "Atualizar configurações CachyOS? (s/n): " -n 1 resposta
@@ -2277,7 +2391,7 @@ kernel.sched_autogroup_enabled = 1
 kernel.perf_cpu_time_max_percent = 20
 EOF
                     
-                    sysctl --system
+                    sysctl --system 2>/dev/null || true
                     
                     echo "Configurações atualizadas. Reinicie para aplicar."
                 fi
@@ -2332,7 +2446,7 @@ kernel.sched_autogroup_enabled = 1
 kernel.perf_cpu_time_max_percent = 20
 EOF
             
-            sysctl --system
+            sysctl --system 2>/dev/null || true
             
             echo "1" > "$S_CACHYCONFS"
             echo "Configurações CachyOS instaladas com sucesso!"
@@ -2367,7 +2481,7 @@ hwaccel_flatpak_install() {
                     
                     if [ -f /etc/environment ]; then
                         echo "Variáveis de ambiente:"
-                        grep -i "flatpak\|wayland\|nvidia\|vaapi" /etc/environment || echo "Nenhuma variável específica encontrada"
+                        grep -i "flatpak\|wayland\|nvidia\|vaapi" /etc/environment 2>/dev/null || echo "Nenhuma variável específica encontrada"
                     fi
                     
                     echo ""
@@ -2454,7 +2568,7 @@ EOF
             
             if ! command -v flatpak &>/dev/null; then
                 echo "Flatpak não está instalado. Instalando..."
-                pacman -S --noconfirm flatpak
+                pacman -S --noconfirm flatpak --needed
             fi
             
             mkdir -p /etc/profile.d/
@@ -2534,7 +2648,7 @@ swapfile_install() {
             1)
                 echo "Status do swap:"
                 echo ""
-                swapon --show
+                swapon --show 2>/dev/null || echo "Nenhum swap ativo"
                 echo ""
                 echo "Uso de memória:"
                 free -h
@@ -2554,11 +2668,16 @@ swapfile_install() {
                         if findmnt -n -o FSTYPE / | grep -q "btrfs"; then
                             echo "Sistema de arquivos Btrfs detectado..."
                             if [ ! -d /swap ]; then
-                                btrfs subvolume create /swap
+                                btrfs subvolume create /swap 2>/dev/null || true
                             fi
-                            btrfs filesystem mkswapfile --size 8g --uuid clear /swap/swapfile
-                            swapon /swap/swapfile
-                            echo "/swap/swapfile none swap defaults 0 0" | tee -a /etc/fstab
+                            btrfs filesystem mkswapfile --size 8g --uuid clear /swap/swapfile 2>/dev/null || {
+                                echo "Falha ao criar swapfile Btrfs. Criando tradicional..."
+                                dd if=/dev/zero of=/swapfile bs=1G count=8 status=progress
+                                chmod 600 /swapfile
+                                mkswap /swapfile
+                            }
+                            swapon /swap/swapfile 2>/dev/null || swapon /swapfile 2>/dev/null || true
+                            echo "/swap/swapfile none swap defaults 0 0" | tee -a /etc/fstab 2>/dev/null || true
                             echo "Swapfile Btrfs criado com sucesso em /swap/swapfile"
                         else
                             echo "Criando swapfile tradicional..."
@@ -2577,11 +2696,16 @@ swapfile_install() {
                         if findmnt -n -o FSTYPE /home | grep -q "btrfs"; then
                             echo "Sistema de arquivos Btrfs detectado..."
                             if [ ! -d /home/swap ]; then
-                                btrfs subvolume create /home/swap
+                                btrfs subvolume create /home/swap 2>/dev/null || true
                             fi
-                            btrfs filesystem mkswapfile --size 8g --uuid clear /home/swap/swapfile
-                            swapon /home/swap/swapfile
-                            echo "/home/swap/swapfile none swap defaults 0 0" | tee -a /etc/fstab
+                            btrfs filesystem mkswapfile --size 8g --uuid clear /home/swap/swapfile 2>/dev/null || {
+                                echo "Falha ao criar swapfile Btrfs. Criando tradicional..."
+                                dd if=/dev/zero of=/home/swapfile bs=1G count=8 status=progress
+                                chmod 600 /home/swapfile
+                                mkswap /home/swapfile
+                            }
+                            swapon /home/swap/swapfile 2>/dev/null || swapon /home/swapfile 2>/dev/null || true
+                            echo "/home/swap/swapfile none swap defaults 0 0" | tee -a /etc/fstab 2>/dev/null || true
                             echo "Swapfile Btrfs criado com sucesso em /home/swap/swapfile"
                         else
                             echo "Criando swapfile tradicional..."
@@ -2606,7 +2730,7 @@ swapfile_install() {
                 read -p "Continuar? (s/n): " -n 1 resposta
                 echo
                 if [ "$resposta" = "s" ]; then
-                    swapoff -a
+                    swapoff -a 2>/dev/null || true
                     
                     if [ -f /swapfile ]; then
                         rm -f /swapfile
@@ -2648,11 +2772,11 @@ swapfile_install() {
                 ;;
         esac
     else
-        if swapon --show | grep -q '.'; then
+        if swapon --show 2>/dev/null | grep -q '.'; then
             echo "Status: SWAP EXISTENTE"
             echo "Swap já está habilitado no sistema."
             echo ""
-            swapon --show
+            swapon --show 2>/dev/null || echo "Não foi possível verificar swap"
             echo ""
             echo "1) Registrar no gerenciador"
             echo "2) Criar novo swapfile"
@@ -2694,11 +2818,16 @@ swapfile_install() {
                         if findmnt -n -o FSTYPE / | grep -q "btrfs"; then
                             echo "Sistema de arquivos Btrfs detectado..."
                             if [ ! -d /swap ]; then
-                                btrfs subvolume create /swap
+                                btrfs subvolume create /swap 2>/dev/null || true
                             fi
-                            btrfs filesystem mkswapfile --size 8g --uuid clear /swap/swapfile
-                            swapon /swap/swapfile
-                            echo "/swap/swapfile none swap defaults 0 0" | tee -a /etc/fstab
+                            btrfs filesystem mkswapfile --size 8g --uuid clear /swap/swapfile 2>/dev/null || {
+                                echo "Falha ao criar swapfile Btrfs. Criando tradicional..."
+                                dd if=/dev/zero of=/swapfile bs=1G count=8 status=progress
+                                chmod 600 /swapfile
+                                mkswap /swapfile
+                            }
+                            swapon /swap/swapfile 2>/dev/null || swapon /swapfile 2>/dev/null || true
+                            echo "/swap/swapfile none swap defaults 0 0" | tee -a /etc/fstab 2>/dev/null || true
                             echo "Swapfile Btrfs criado com sucesso em /swap/swapfile"
                         else
                             echo "Criando swapfile tradicional..."
@@ -2718,11 +2847,16 @@ swapfile_install() {
                         if findmnt -n -o FSTYPE /home | grep -q "btrfs"; then
                             echo "Sistema de arquivos Btrfs detectado..."
                             if [ ! -d /home/swap ]; then
-                                btrfs subvolume create /home/swap
+                                btrfs subvolume create /home/swap 2>/dev/null || true
                             fi
-                            btrfs filesystem mkswapfile --size 8g --uuid clear /home/swap/swapfile
-                            swapon /home/swap/swapfile
-                            echo "/home/swap/swapfile none swap defaults 0 0" | tee -a /etc/fstab
+                            btrfs filesystem mkswapfile --size 8g --uuid clear /home/swap/swapfile 2>/dev/null || {
+                                echo "Falha ao criar swapfile Btrfs. Criando tradicional..."
+                                dd if=/dev/zero of=/home/swapfile bs=1G count=8 status=progress
+                                chmod 600 /home/swapfile
+                                mkswap /home/swapfile
+                            }
+                            swapon /home/swap/swapfile 2>/dev/null || swapon /home/swapfile 2>/dev/null || true
+                            echo "/home/swap/swapfile none swap defaults 0 0" | tee -a /etc/fstab 2>/dev/null || true
                             echo "Swapfile Btrfs criado com sucesso em /home/swap/swapfile"
                         else
                             echo "Criando swapfile tradicional..."
@@ -2755,13 +2889,18 @@ swapfile_install() {
                         echo "Criando swapfile de ${swap_size}GB em $swap_location..."
                         
                         dir=$(dirname "$swap_location")
-                        if findmnt -n -o FSTYPE "$dir" | grep -q "btrfs"; then
+                        if findmnt -n -o FSTYPE "$dir" 2>/dev/null | grep -q "btrfs"; then
                             echo "Sistema de arquivos Btrfs detectado..."
                             btrfs_dir="${dir}/swap-$(date +%s)"
-                            btrfs subvolume create "$btrfs_dir"
-                            btrfs filesystem mkswapfile --size ${swap_size}g --uuid clear "${btrfs_dir}/swapfile"
-                            swapon "${btrfs_dir}/swapfile"
-                            echo "${btrfs_dir}/swapfile none swap defaults 0 0" | tee -a /etc/fstab
+                            btrfs subvolume create "$btrfs_dir" 2>/dev/null || true
+                            btrfs filesystem mkswapfile --size ${swap_size}g --uuid clear "${btrfs_dir}/swapfile" 2>/dev/null || {
+                                echo "Falha ao criar swapfile Btrfs. Criando tradicional..."
+                                dd if=/dev/zero of="$swap_location" bs=1G count=$swap_size status=progress
+                                chmod 600 "$swap_location"
+                                mkswap "$swap_location"
+                            }
+                            swapon "${btrfs_dir}/swapfile" 2>/dev/null || swapon "$swap_location" 2>/dev/null || true
+                            echo "${btrfs_dir}/swapfile none swap defaults 0 0" | tee -a /etc/fstab 2>/dev/null || true
                             echo "Swapfile Btrfs criado com sucesso em ${btrfs_dir}/swapfile"
                         else
                             echo "Criando swapfile tradicional..."
